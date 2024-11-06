@@ -1,0 +1,135 @@
+# Lauren Eckerle
+# Assignment 10
+# 11/4/24
+
+# Load Libraries
+library(shiny)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(plotly)
+
+# Set Working Directory
+setwd("~/Library/CloudStorage/OneDrive-SouthDakotaStateUniversity-SDSU/Fall 2024/STAT 442/Assignment 10")
+
+# Import Data
+AccidentData <- read_csv("accident.data.csv")
+
+
+# Import Data
+AccidentData <- read_csv("accident.data.csv")
+
+# Group HARM_EVNAME into broader categories
+AccidentData <- AccidentData %>%
+  mutate(HARM_CATEGORY = case_when(
+    HARM_EVNAME %in% c("Motor Vehicle In-Transport", 
+                       "Motor Vehicle In-Transport Strikes or is Struck by Cargo, Persons or Objects Set-in-Motion from/by Another Motor Vehicle In Transport",
+                       "Pedestrian", "Bicycle", "Non-Motorist on Personal Conveyance", "Working Motor Vehicle") ~ "Collision with Vehicle",
+    HARM_EVNAME %in% c("Tree (Standing Only)", "Ditch", "Fence", "Embankment", "Utility Pole/Light Support",
+                       "Culvert", "Traffic Sign Support", "Bridge Pier or Support", "Other Fixed Object",
+                       "Guardrail Face", "Bridge Rail (Includes parapet)", "Curb", "Mail Box", "Building", 
+                       "Boulder", "Cable Barrier", "Concrete Traffic Barrier", "Impact Attenuator/Crash Cushion", 
+                       "Fire Hydrant", "Unknown Fixed Object", "Bridge Overhead Structure") ~ "Collision with Fixed Object",
+    HARM_EVNAME %in% c("Fell/Jumped from Vehicle", "Rollover/Overturn", "Jackknife (harmful to this vehicle)", 
+                       "Immersion or Partial Immersion", "Fire/Explosion", "Injured In Vehicle (Non-Collision)", 
+                       "Pavement Surface Irregularity (Ruts, Potholes, Grates, etc.)", "Thrown or Falling Object", 
+                       "Road Vehicle on Rails", "Other Non-Collision") ~ "Non-Collision Incident",
+    HARM_EVNAME %in% c("Live Animal", "Ridden Animal or Animal Drawn Conveyance") ~ "Animal Related",
+    HARM_EVNAME %in% c("Cargo/Equipment Loss, Shift, or Damage [harmful]", "Other Object (not fixed)", 
+                       "Snow Bank", "Post, Pole or Other Supports", "Traffic Signal Support", 
+                       "Unknown Object Not Fixed") ~ "Other Objects",
+    TRUE ~ "Unreported or Other"
+  ))
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Accident Data Analysis"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("state1", "Select State 1:", 
+                  choices = unique(AccidentData$STATENAME)),
+      selectInput("state2", "Select State 2:", 
+                  choices = unique(AccidentData$STATENAME))
+    ),
+    mainPanel(
+      plotlyOutput("accidentTrendPlot", height = "600px"),  # Accident Trends
+      plotlyOutput("dailyAccidentPlot", height = "600px"),   # Daily Trends
+      plotlyOutput("hourlyAccidentPlot", height = "600px")   # Hourly Trends
+    )
+  )
+)
+
+# Define server logic
+server <- function(input, output) {
+  
+  # Trend Plot
+  output$accidentTrendPlot <- renderPlotly({
+    trend_data <- AccidentData %>%
+      filter(STATENAME == input$state1 | STATENAME == input$state2) %>%
+      group_by(MONTHNAME, STATENAME, HARM_CATEGORY) %>%
+      summarize(AccidentCount = n(), .groups = "drop")
+    
+    # Change month names to abbreviations
+    trend_data$MONTHNAME <- factor(trend_data$MONTHNAME, 
+                                   levels = c("January", "February", "March", "April", 
+                                              "May", "June", "July", "August", 
+                                              "September", "October", "November", "December"),
+                                   labels = c("Jan", "Feb", "Mar", "Apr", "May", 
+                                              "Jun", "Jul", "Aug", "Sep", "Oct", 
+                                              "Nov", "Dec"))
+    
+    # Create stacked bar plot and show only every other month label
+    p <- ggplot(trend_data, aes(x = MONTHNAME, y = AccidentCount, fill = HARM_CATEGORY)) +
+      geom_bar(stat = "identity", position = "stack") +  # Use stacked position
+      facet_wrap(~ STATENAME) +
+      labs(title = paste("Accident Trends in", input$state1, "and", input$state2),
+           x = "Month", y = "Number of Accidents", fill = "Accident Category") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) +
+      scale_x_discrete(breaks = c("Jan", "Mar", "May", "Jul", "Sep", "Nov"))  # Display every other month
+    
+    ggplotly(p)  # Make it interactive
+  })
+  
+  # Daily Plot
+  output$dailyAccidentPlot <- renderPlotly({
+    daily_data <- AccidentData %>%
+      filter(STATENAME == input$state1 | STATENAME == input$state2) %>%
+      group_by(DAY_WEEKNAME, STATENAME) %>%
+      summarize(AccidentCount = n(), .groups = "drop")
+    
+    # Change day names to abbreviations
+    daily_data$DAY_WEEKNAME <- factor(daily_data$DAY_WEEKNAME, 
+                                      levels = c("Sunday", "Monday", "Tuesday", 
+                                                 "Wednesday", "Thursday", "Friday", "Saturday"),
+                                      labels = c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))
+    
+    p_daily <- ggplot(daily_data, aes(x = DAY_WEEKNAME, y = AccidentCount, color = STATENAME)) +
+      geom_line(group = 1) +  # Line plot for daily trends
+      labs(title = "Accident Trends by Day of the Week",
+           x = "Day of the Week", y = "Number of Accidents") +
+      theme_minimal()
+    
+    ggplotly(p_daily)  # Make it interactive
+  })
+  
+  # Hourly Plot
+  output$hourlyAccidentPlot <- renderPlotly({
+    hourly_data <- AccidentData %>%
+      filter(HOUR >= 0 & HOUR <= 23, STATENAME == input$state1 | STATENAME == input$state2) %>%  # Exclude hours not in range and filter by states
+      group_by(HOUR, STATENAME) %>%
+      summarize(AccidentCount = n(), .groups = "drop")
+    
+    p_hourly <- ggplot(hourly_data, aes(x = HOUR, y = AccidentCount, color = STATENAME)) +
+      geom_line() +  # Line plot for hourly trends
+      labs(title = "Accident Trends by Hour of Day",
+           x = "Hour of Day", y = "Number of Accidents") +
+      scale_x_continuous(breaks = seq(0, 23, by = 4)) +  # Show every 4 hours
+      theme_minimal()
+    
+    ggplotly(p_hourly)  # Make it interactive
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
